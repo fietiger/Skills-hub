@@ -110,8 +110,8 @@ def download_emails():
                 mail.store(mail_id, '+FLAGS', '\\Deleted')
                 continue
 
-            # 过滤发票相关邮件 (为了避免误删非广告但非发票的邮件，我们这里仅处理感兴趣的)
-            if "发票" not in subject and "行程单" not in subject and "电子凭证" not in subject:
+            # 过滤发票相关邮件
+            if ("发票" not in subject and "行程单" not in subject and "电子凭证" not in subject):
                 continue
 
             print(f"\n--- 正在处理邮件: {subject} ---")
@@ -143,6 +143,13 @@ def download_emails():
                         with open(pdf_path, "wb") as f:
                             f.write(part.get_payload(decode=True))
                         print(f"已下载 PDF 附件: {safe_name}")
+                        
+                        # 识别发票类型并移动到对应分类文件夹
+                        from invoice_downloader import classify_invoice_type, move_to_category_folder
+                        invoice_type = classify_invoice_type(pdf_path)
+                        print(f"发票类型识别结果: {invoice_type}")
+                        move_to_category_folder(pdf_path, invoice_type)
+                        
                         has_pdf_attachment = True
                 
                 # 提取 HTML 内容

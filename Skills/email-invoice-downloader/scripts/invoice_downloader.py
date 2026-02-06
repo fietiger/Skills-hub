@@ -2,6 +2,8 @@ import requests
 import re
 import os
 import time
+import pdfplumber
+import shutil
 from playwright.sync_api import sync_playwright
 
 def download_51fapiao(url, output_dir="downloads"):
@@ -41,6 +43,12 @@ def download_51fapiao(url, output_dir="downloads"):
             with open(output_path, 'wb') as f:
                 f.write(response.content)
             print(f"下载成功 (直接返回): {output_path}")
+            
+            # 识别发票类型并移动到对应分类文件夹
+            invoice_type = classify_invoice_type(output_path)
+            print(f"发票类型识别结果: {invoice_type}")
+            move_to_category_folder(output_path, invoice_type)
+            
             return output_path
 
         # 否则解析 signatureString
@@ -62,6 +70,12 @@ def download_51fapiao(url, output_dir="downloads"):
                 f.write(chunk)
         
         print(f"下载成功 (构造 URL): {output_path}")
+        
+        # 识别发票类型并移动到对应分类文件夹
+        invoice_type = classify_invoice_type(output_path)
+        print(f"发票类型识别结果: {invoice_type}")
+        move_to_category_folder(output_path, invoice_type)
+        
         return output_path
 
     except Exception as e:
@@ -115,10 +129,10 @@ def download_nuonuo(url, output_dir="downloads"):
             # 访问页面
             page.goto(url, wait_until="networkidle")
             
-            # 等待“下载PDF”按钮出现并点击
-            # 诺诺网的按钮通常包含“下载”字样
+            # 等待"下载PDF"按钮出现并点击
+            # 诺诺网的按钮通常包含"下载"字样
             try:
-                # 尝试查找包含“下载”文本的按钮
+                # 尝试查找包含"下载"文本的按钮
                 download_btn = page.wait_for_selector("text=下载", timeout=10000)
                 if download_btn:
                     download_btn.click()
@@ -155,6 +169,12 @@ def download_nuonuo(url, output_dir="downloads"):
                         f.write(chunk)
                 
                 print(f"诺诺网发票下载成功: {output_path}")
+                
+                # 识别发票类型并移动到对应分类文件夹
+                invoice_type = classify_invoice_type(output_path)
+                print(f"发票类型识别结果: {invoice_type}")
+                move_to_category_folder(output_path, invoice_type)
+                
                 browser.close()
                 return output_path
             else:
@@ -166,3 +186,73 @@ def download_nuonuo(url, output_dir="downloads"):
     except Exception as e:
         print(f"诺诺网下载失败: {e}")
         return None
+
+
+def classify_invoice_type(pdf_path):
+    """
+    识别发票类型：滴滴车票、火车票、餐费或其他
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            text = ""
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        
+        # 检查是否包含滴滴相关关键词
+        didi_keywords = ['滴滴', '滴滴出行', '快车', '专车', '出租车', '网约车', '行程']
+        train_keywords = ['铁路', '火车', '高铁', '动车', '12306', '客票', '乘车']
+        food_keywords = ['餐饮', '餐费', '饭费', '饮食', '餐厅', '酒楼', '饭店', '食堂', '茶楼', '茶饮', '咖啡', '菜品', '食品']
+
+        text_lower = text.lower()
+        
+        didi_count = sum(1 for keyword in didi_keywords if keyword in text_lower)
+        train_count = sum(1 for keyword in train_keywords if keyword in text_lower)
+        food_count = sum(1 for keyword in food_keywords if keyword in text_lower)
+        
+        # 确定最大计数对应的类别
+        max_count = max(didi_count, train_count, food_count)
+        
+        if max_count == 0:
+            return "其他发票"  # 如果没有匹配任何关键词
+        
+        if didi_count == max_count:
+            return "滴滴车票"
+        elif train_count == max_count:
+            return "火车票"
+        elif food_count == max_count:
+            return "餐费发票"
+        else:
+            return "其他发票"
+    except Exception as e:
+        print(f"识别发票类型时出错: {e}")
+        return "其他发票"
+
+
+def move_to_category_folder(file_path, category):
+    """
+    将发票移动到对应的分类文件夹
+    """
+    try:
+        # 获取原始文件名
+        filename = os.path.basename(file_path)
+        
+        # 创建目标文件夹路径
+        # 找到项目根目录
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        target_dir = os.path.join(project_root, "downloads", category)
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+        
+        # 创建目标文件路径
+        target_path = os.path.join(target_dir, filename)
+        
+        # 移动文件
+        shutil.move(file_path, target_path)
+        print(f"文件已移动到: {target_path}")
+        
+        return target_path
+    except Exception as e:
+        print(f"移动文件时出错: {e}")
+        return file_path

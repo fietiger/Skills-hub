@@ -5,6 +5,8 @@ import os
 from playwright.sync_api import sync_playwright
 import time
 import requests
+import pdfplumber
+import shutil
 
 def decode_qr(file_path):
     """
@@ -29,6 +31,77 @@ def decode_qr(file_path):
     except Exception as e:
         print(f"解码过程中出错: {e}")
         return None
+
+def classify_invoice_type(pdf_path):
+    """
+    识别发票类型：住宿或餐饮
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            text = ""
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        
+        # 检查是否包含住宿相关关键词
+        accommodation_keywords = ['住宿', '宾馆', '酒店', '旅馆', '客栈', '民宿', '度假村', '会所', '公寓']
+        food_keywords = ['餐饮', '餐费', '饭费', '饮食', '餐厅', '酒楼', '饭店', '食堂', '茶楼', '茶饮', '咖啡']
+
+        text_lower = text.lower()
+        
+        accommodation_count = sum(1 for keyword in accommodation_keywords if keyword in text_lower)
+        food_count = sum(1 for keyword in food_keywords if keyword in text_lower)
+        
+        if accommodation_count > food_count:
+            return "住宿发票"
+        elif food_count > accommodation_count:
+            return "餐饮发票"
+        else:
+            # 如果无法明确分类，尝试进一步分析
+            # 检查是否包含住宿特有的关键词
+            accommodation_specific = ['住宿服务', '房费', '客房', '钟点房', '套房', '标间', '单间']
+            food_specific = ['餐饮服务', '菜品', '酒水', '饮料', '食品', '火锅', '烧烤', '自助餐']
+            
+            accommodation_specific_count = sum(1 for keyword in accommodation_specific if keyword in text_lower)
+            food_specific_count = sum(1 for keyword in food_specific if keyword in text_lower)
+            
+            if accommodation_specific_count > food_specific_count:
+                return "住宿发票"
+            elif food_specific_count > accommodation_specific_count:
+                return "餐饮发票"
+            else:
+                return "其他发票"  # 如果仍然无法分类，则归为其他
+    except Exception as e:
+        print(f"识别发票类型时出错: {e}")
+        return "其他发票"
+
+
+def move_to_category_folder(file_path, category):
+    """
+    将发票移动到对应的分类文件夹
+    """
+    try:
+        # 获取原始文件名
+        filename = os.path.basename(file_path)
+        
+        # 创建目标文件夹路径
+        target_dir = os.path.join(os.path.dirname(file_path), category)
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+        
+        # 创建目标文件路径
+        target_path = os.path.join(target_dir, filename)
+        
+        # 移动文件
+        shutil.move(file_path, target_path)
+        print(f"文件已移动到: {target_path}")
+        
+        return target_path
+    except Exception as e:
+        print(f"移动文件时出错: {e}")
+        return file_path
+
 
 def download_invoice(url, output_dir="downloads"):
     """
@@ -125,14 +198,26 @@ def download_invoice(url, output_dir="downloads"):
 
             # 等待一段时间确保下载完成
             time.sleep(5)
+            
+            # 如果成功下载了PDF文件，进行分类
+            if captured_url[0] and os.path.isfile(captured_url[0]) and captured_url[0].endswith('.pdf'):
+                downloaded_file_path = captured_url[0]
+                print(f"正在识别发票类型: {downloaded_file_path}")
+                
+                # 识别发票类型
+                invoice_type = classify_invoice_type(downloaded_file_path)
+                print(f"发票类型识别结果: {invoice_type}")
+                
+                # 移动到对应分类文件夹
+                move_to_category_folder(downloaded_file_path, invoice_type)
         except Exception as e:
             print(f"访问或下载过程中出错: {e}")
         finally:
             browser.close()
 
 def main():
-    # 确定项目根目录
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    # 确定项目根目录（使用当前工作目录）
+    project_root = os.getcwd()
     qr_dir = os.path.join(project_root, "发票二维码")
     
     if not os.path.exists(qr_dir):

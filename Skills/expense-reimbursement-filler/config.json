@@ -1,0 +1,18 @@
+{
+  "name": "expense-reimbursement-filler",
+  "version": "1.0.0",
+  "description": "从费用清单.xlsx自动填写费用报销单.xlsx的E5-E7单元格",
+  "author": "Trae AI Assistant",
+  "dependencies": [
+    "pandas",
+    "openpyxl"
+  ],
+  "entry_point": "scripts/fill_reimbursement.py",
+  "input_files": [
+    "费用清单.xlsx",
+    "费用报销单.xlsx"
+  ],
+  "output_files": [
+    "费用报销单_已填写.xlsx"
+  ]
+}

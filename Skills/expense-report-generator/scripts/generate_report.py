@@ -4,6 +4,7 @@ from openpyxl.styles import Border, Side, Alignment, Font
 from copy import copy
 import datetime
 import os
+import re
 
 def generate_expense_list():
     # 1. 定义文件路径 (使用相对路径或从 skill 资源目录读取)
@@ -12,19 +13,10 @@ def generate_expense_list():
     
     # 输入文件默认在当前工作目录
     train_path = os.path.abspath('火车票汇总信息表.xlsx')
-    didi_path = os.path.abspath('滴滴行程明细汇总表.xlsx')
+    didi_path = os.path.abspath('滴滴行程明细信息汇总表.xlsx')
+    accommodation_path = os.path.abspath('住宿发票信息汇总表.xlsx')
+    meal_path = os.path.abspath('餐费发票信息汇总表.xlsx')
     output_path = os.path.abspath('费用清单.xlsx')
-
-
-
-    # 2. 读取火车票数据 (使用 openpyxl 避免公式读取问题)
-    wb_train = load_workbook(train_path)
-    ws_train = wb_train.active
-    train_data = []
-    header = [cell.value for cell in ws_train[1]]
-    for row in ws_train.iter_rows(min_row=2):
-        row_dict = {header[i]: cell.value for i, cell in enumerate(row)}
-        train_data.append(row_dict)
 
     def clean_price(val):
         if val is None: return 0.0
@@ -35,45 +27,122 @@ def generate_expense_list():
         except:
             return 0.0
 
-    # 3. 整理汇总数据
+    # 2. 整理汇总数据
     consolidated_data = []
 
-    # 处理火车票
-    for row in train_data:
-        price = clean_price(row['price'])
-        dep = str(row['departure_station'])
-        arr = str(row['arrival_station'])
-        dt_val = row['date']
-        date_str = dt_val.strftime('%Y-%m-%d') if isinstance(dt_val, (datetime.datetime, datetime.date)) else str(dt_val)
-        
-        consolidated_data.append({
-            '日期': date_str,
-            '事由': f"出差交通({dep}-{arr})",
-            '项目名称': '公共项目',
-            '类别': '长途交通费',
-            '金额': price,
-            '备注': ''
-        })
+    # 处理火车票（如果文件存在）
+    if os.path.exists(train_path):
+        df_train = pd.read_excel(train_path)
+        for _, row in df_train.iterrows():
+            price = clean_price(row['price'])
+            dep = str(row['departure_station'])
+            arr = str(row['arrival_station'])
+            date_str = str(row['date'])[:10]  # 取 YYYY-MM-DD 部分
+            if '/' in date_str:
+                # 如果日期格式是 YYYY/MM/DD，转换为 YYYY-MM-DD
+                date_str = date_str.replace('/', '-')
+            
+            consolidated_data.append({
+                '日期': date_str,
+                '事由': f"出差交通({dep}-{arr})",
+                '项目名称': '公共项目',
+                '类别': '长途交通费',
+                '金额': price,
+                '备注': f"车次: {row['train_number']}"
+            })
+        print(f"已处理火车票数据: {len(df_train)} 条记录")
+    else:
+        print(f"警告: 未找到火车票文件 {train_path}，将跳过火车票处理")
 
-    # 处理滴滴行程
-    df_didi = pd.read_excel(didi_path)
-    for _, row in df_didi.iterrows():
-        time_str = str(row['上车时间'])
-        try:
-            # 补全年份为 2026
-            dt = datetime.datetime.strptime(f"2026-{time_str}", '%Y-%m-%d %H:%M')
-            date_str = dt.strftime('%Y-%m-%d')
-        except:
-            date_str = time_str
-        
-        consolidated_data.append({
-            '日期': date_str,
-            '事由': '市内交通',
-            '项目名称': '公共项目',
-            '类别': '市内交通费',
-            '金额': row['金额[元]'],
-            '备注': ''
-        })
+    # 处理滴滴行程（如果文件存在）
+    if os.path.exists(didi_path):
+        df_didi = pd.read_excel(didi_path)
+        for _, row in df_didi.iterrows():
+            time_str = str(row['上车时间'])
+            try:
+                # 补全年份为 2026
+                dt = datetime.datetime.strptime(f"2026-{time_str}", '%Y-%m-%d %H:%M')
+                date_str = dt.strftime('%Y-%m-%d')
+            except:
+                date_str = time_str
+            
+            consolidated_data.append({
+                '日期': date_str,
+                '事由': '市内交通',
+                '项目名称': '公共项目',
+                '类别': '市内交通费',
+                '金额': row['金额[元]'],
+                '备注': ''
+            })
+        print(f"已处理滴滴行程数据: {len(df_didi)} 条记录")
+    else:
+        print(f"警告: 未找到滴滴行程文件 {didi_path}，将跳过滴滴行程处理")
+
+    # 处理住宿发票（如果文件存在）
+    if os.path.exists(accommodation_path):
+        df_accommodation = pd.read_excel(accommodation_path)
+        for _, row in df_accommodation.iterrows():
+            # 从开票日期提取日期部分 - 处理不同格式的日期
+            date_val = row['开票日期']
+            date_str = str(date_val)
+            
+            # 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
+            if len(date_str) == 8 and date_str.isdigit():
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            elif '/' in date_str:
+                # 如果日期格式是 YYYY/MM/DD，转换为 YYYY-MM-DD
+                date_str = date_str.replace('/', '-')
+            elif '年' in date_str and '月' in date_str and '日' in date_str:
+                # 处理 "YYYY年MM月DD日" 格式
+                match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
+                if match:
+                    year, month, day = match.groups()
+                    date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+            
+            consolidated_data.append({
+                '日期': date_str,
+                '事由': '住宿费',
+                '项目名称': '公共项目',
+                '类别': '住宿费',
+                '金额': clean_price(row['金额']),
+                '备注': f"酒店: {row['销售方名称']}"
+            })
+        print(f"已处理住宿发票数据: {len(df_accommodation)} 条记录")
+    else:
+        print(f"警告: 未找到住宿发票文件 {accommodation_path}，将跳过住宿发票处理")
+
+    # 处理餐费发票（如果文件存在）
+    if os.path.exists(meal_path):
+        df_meal = pd.read_excel(meal_path)
+        for _, row in df_meal.iterrows():
+            # 从开票日期提取日期部分 - 处理不同格式的日期
+            date_val = row['开票日期']
+            date_str = str(date_val)
+            
+            # 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
+            if len(date_str) == 8 and date_str.isdigit():
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            elif '/' in date_str:
+                # 如果日期格式是 YYYY/MM/DD，转换为 YYYY-MM-DD
+                date_str = date_str.replace('/', '-')
+            elif '年' in date_str and '月' in date_str and '日' in date_str:
+                # 处理 "YYYY年MM月DD日" 格式
+                match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
+                if match:
+                    year, month, day = match.groups()
+                    date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+            
+            consolidated_data.append({
+                '日期': date_str,
+                '事由': '餐费',
+                '项目名称': '公共项目',
+                '类别': '餐费',
+                '金额': clean_price(row['金额']),
+                '备注': f"商家: {row['销售方名称']}"
+            })
+        print(f"已处理餐费发票数据: {len(df_meal)} 条记录")
+    else:
+        print(f"警告: 未找到餐费发票文件 {meal_path}，将跳过餐费发票处理")
 
     # 按日期排序
     df_result = pd.DataFrame(consolidated_data).sort_values(by='日期')
@@ -101,39 +170,26 @@ def generate_expense_list():
     rmb_format = '¥#,##0.00'
 
     # 填充新数据
-    current_row = 4
-    for _, row_data in df_result.iterrows():
-        ws.append([
-            row_data['日期'],
-            row_data['事由'],
-            row_data['项目名称'],
-            row_data['类别'],
-            row_data['金额'],
-            row_data['备注']
-        ])
-        
-        # 应用样式
-        for i, cell in enumerate(ws[current_row]):
-            if i < len(styles):
-                cell.font = copy(styles[i]['font'])
-                cell.border = copy(styles[i]['border'])
-                cell.fill = copy(styles[i]['fill'])
-                cell.alignment = copy(styles[i]['alignment'])
-            if i == 4: # 金额列 (E)
-                cell.number_format = rmb_format
-        current_row += 1
+    for idx, (_, row) in enumerate(df_result.iterrows()):
+        target_row = 4 + idx
+        for col_idx, value in enumerate([row['日期'], row['事由'], row['项目名称'], 
+                                         row['类别'], row['金额'], row['备注']], start=1):
+            cell = ws.cell(row=target_row, column=col_idx, value=value)
+            if col_idx <= len(styles):
+                style = styles[col_idx-1]
+                cell.font = style['font']
+                cell.border = style['border']
+                cell.fill = style['fill']
+                cell.alignment = style['alignment']
+
+        # 设置货币格式
+        if isinstance(row['金额'], (int, float)):
+            ws.cell(row=target_row, column=5).number_format = rmb_format
 
     # 添加合计行
-    ws.cell(row=current_row, column=1, value='合计')
-    for i, cell in enumerate(ws[current_row]):
-        if i < len(styles):
-            cell.font = copy(styles[i]['font'])
-            cell.border = copy(styles[i]['border'])
-            cell.fill = copy(styles[i]['fill'])
-            cell.alignment = copy(styles[i]['alignment'])
-        if i == 4: # 金额列合计
-            cell.value = f"=SUM(E4:E{current_row-1})"
-            cell.number_format = rmb_format
+    total_row = 4 + len(df_result)
+    ws.cell(row=total_row, column=2, value="合计").font = Font(bold=True)
+    ws.cell(row=total_row, column=5, value=f"=SUM(E4:E{total_row-1})").number_format = rmb_format
 
     # 5. 特殊处理 A2:F2 合并单元格边框 (移除整个范围的左右外边框)
     # 对于合并单元格，需要处理范围边界上的所有单元格

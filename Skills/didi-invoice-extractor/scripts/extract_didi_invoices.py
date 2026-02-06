@@ -28,19 +28,48 @@ def extract_invoice_info(pdf_path):
             if date_match:
                 info["开票日期"] = date_match.group(1)
                 
-            # Amount
+            # Amount - Updated to handle more patterns
             lines = text.split('\n')
             for line in lines:
                 if "价税合计" in line:
-                    amt_match = re.search(r"¥\s*([\d\.]+)", line)
+                    # Handle the specific pattern "（小写）¥100.80"
+                    amt_match = re.search(r"（小写）\s*¥\s*([0-9,\.]+)", line)
+                    if not amt_match:
+                        # Alternative pattern in case of encoding issues
+                        amt_match = re.search(r"（小写）\s*[¥￥]\s*([0-9,\.]+)", line)
                     if amt_match:
-                        info["金额"] = float(amt_match.group(1))
+                        # Clean the number string (remove commas)
+                        amount_str = amt_match.group(1).replace(',', '')
+                        info["金额"] = float(amount_str)
                         break
             
             if info["金额"] == 0.0:
-                amts = re.findall(r"¥\s*([\d\.]+)", text)
+                # Additional fallback: look for amounts after 价税合计 anywhere in text
+                combined_text = ''.join(lines)
+                # Look for the specific pattern in the entire text
+                amt_match = re.search(r"价税合计[^\n]*（小写）\s*¥\s*([0-9,\.]+)", combined_text)
+                if amt_match:
+                    amount_str = amt_match.group(1).replace(',', '')
+                    info["金额"] = float(amount_str)
+            
+            if info["金额"] == 0.0:
+                # Another fallback: find any ¥ followed by numbers after 价税合计
+                # Extract everything after 价税合计
+                price_section_match = re.search(r"价税合计[^\n\r]*", text)
+                if price_section_match:
+                    price_section = price_section_match.group()
+                    # Look for the ¥ pattern specifically in this section
+                    amt_match = re.search(r"（小写）\s*¥\s*([0-9,\.]+)", price_section)
+                    if amt_match:
+                        amount_str = amt_match.group(1).replace(',', '')
+                        info["金额"] = float(amount_str)
+            
+            if info["金额"] == 0.0:
+                # Final fallback: find any ¥ followed by numbers
+                amts = re.findall(r"¥\s*([0-9,\.]+)", text)
                 if amts:
-                    info["金额"] = float(amts[-1])
+                    amount_str = amts[-1].replace(',', '')
+                    info["金额"] = float(amount_str)
 
             # Names and Tax IDs
             name_matches = re.findall(r"名称[:：]\s*([^\n\s]+)", text)

@@ -75,9 +75,17 @@ class TrainTicketExtractor:
                 if seat_type_match:
                     ticket_info['seat_type'] = seat_type_match.group(1)
         
-        price_match = re.search(r'￥(\d+\.?\d*)', text)
-        if price_match:
-            ticket_info['price'] = price_match.group(1)
+        # 尝试多种价格模式匹配
+        price_patterns = [
+            r'￥\s*(\d+\.?\d*)',  # 匹配 ￥880.00 或 ￥ 880.00
+            r'票价:\s*￥\s*(\d+\.?\d*)',  # 匹配 票价: ￥ 880.00
+            r'(\d+\.?\d+)\s*元',  # 匹配 880.00 元
+        ]
+        for pattern in price_patterns:
+            price_match = re.search(pattern, text)
+            if price_match:
+                ticket_info['price'] = price_match.group(1)
+                break
         
         name_match = re.search(r'\d+\*+\d+\s+([^\s]{2,4})', text)
         if name_match:
@@ -134,9 +142,10 @@ class TrainTicketExtractor:
                     df[h] = ""
             
             if 'invoice_number' in df.columns:
-                df['invoice_number'] = df['invoice_number'].apply(lambda x: f'="{x}"' if x else "")
+                df['invoice_number'] = df['invoice_number'].apply(lambda x: f'="{x}"' if x and str(x) != '' else "")
             if 'price' in df.columns:
-                df['price'] = df['price'].apply(lambda x: f'={x}' if x else "")
+                # 使用制表符前缀避免Excel将值解释为公式
+                df['price'] = df['price'].apply(lambda x: f'\t{x}' if x and pd.notna(x) and str(x) != '' else "")
             
             df = df[headers]
             df.to_excel(output_file, index=False)
